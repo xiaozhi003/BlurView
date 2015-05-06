@@ -13,6 +13,10 @@ import android.graphics.drawable.BitmapDrawable;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v7.app.ActionBarActivity;
+import android.support.v8.renderscript.Allocation;
+import android.support.v8.renderscript.Element;
+import android.support.v8.renderscript.RenderScript;
+import android.support.v8.renderscript.ScriptIntrinsicBlur;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewTreeObserver.OnPreDrawListener;
@@ -49,13 +53,16 @@ public class MainActivity extends ActionBarActivity {
 					public boolean onPreDraw() {
 						mImageView.getViewTreeObserver()
 								.removeOnPreDrawListener(this);
+						// 加载背景图构建Bitmap
 						mImageView.buildDrawingCache();
+						// 获取ImageView缓存的Bitmap
 						Bitmap bmp = mImageView.getDrawingCache();
+						// 在异步任务中执行模糊
 						new BlurTask().execute(bmp);
 						return true;
 					}
 				});
-		
+
 		// 图片缩放动画
 		ObjectAnimator imageAnimator = ObjectAnimator.ofFloat(mImageView,
 				"scaleX", 1.0f, 1.1f).setDuration(2000);
@@ -96,7 +103,8 @@ public class MainActivity extends ActionBarActivity {
 			@Override
 			public void onAnimationEnd(Animator animation) {
 				super.onAnimationEnd(animation);
-				Intent intent = new Intent(MainActivity.this, BlurActivity.class);
+				Intent intent = new Intent(MainActivity.this,
+						BlurActivity.class);
 				startActivity(intent);
 				MainActivity.this.finish();
 			}
@@ -127,21 +135,41 @@ public class MainActivity extends ActionBarActivity {
 		paint.setFlags(Paint.FILTER_BITMAP_FLAG);
 		canvas.drawBitmap(bkg, 0, 0, paint);
 
-		// 模糊Bitmap
-		StackBlurManager stackBlurManager = new StackBlurManager(overlay);
-		stackBlurManager.process((int) radius);
-		overlay = stackBlurManager.returnBlurredImage();
+		// 模糊Bitmap(StackBlur开源库实现)
+		// StackBlurManager stackBlurManager = new StackBlurManager(overlay);
+		// stackBlurManager.processNatively((int)radius);
+		// overlay = stackBlurManager.returnBlurredImage();
 
-		// RenderScript rs = RenderScript.create(MainActivity.this);
-		//
-		// Allocation overlayAlloc = Allocation.createFromBitmap(rs, overlay);
-		// ScriptIntrinsicBlur blur = ScriptIntrinsicBlur.create(rs,
-		// overlayAlloc.getElement());
-		// blur.setInput(overlayAlloc);
-		// blur.setRadius(radius);
-		// blur.forEach(overlayAlloc);
-		// overlayAlloc.copyTo(overlay);
-		// rs.destroy();
+		/**
+		 * 用RenderScript来实现模糊效果
+		 */
+		// 初始化RenderScript对象
+		RenderScript rs = RenderScript.create(MainActivity.this);
+
+		// 为要模糊Bitmap分配内存
+		Allocation overlayAlloc = Allocation.createFromBitmap(rs, overlay);
+
+		// 创建系统提供的模糊类
+		ScriptIntrinsicBlur blur = ScriptIntrinsicBlur.create(rs,
+				Element.U8_4(rs));
+
+		// 设置模糊半径
+		blur.setRadius(radius);
+
+		// 执行渲染
+		/**
+		 * 这里可以创建两个Bitmap一个用于输入一个用于输出， 现在合成一个既是输入也是输出的Bitmap也算是节省的内存
+		 */
+		blur.setInput(overlayAlloc);
+		blur.forEach(overlayAlloc);
+
+		// 将Bitmap复制给overlay
+		overlayAlloc.copyTo(overlay);
+
+		// 销毁RenderScript
+		rs.destroy();
+
+		bkg.recycle();
 		return overlay;
 	}
 
@@ -158,6 +186,7 @@ public class MainActivity extends ActionBarActivity {
 		@Override
 		protected void onPostExecute(Bitmap result) {
 			super.onPostExecute(result);
+			// 将模糊的Bitmap设置到View上
 			mBlurView.setBackground(new BitmapDrawable(getResources(), result));
 		}
 	}
